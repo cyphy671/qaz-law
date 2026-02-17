@@ -1,3 +1,4 @@
 # qaz-law
 
-An attempt to git-ify Qazaqstan legislation
+_An attempt to version-control the Code of the Republic of Qazaqstan_
+
