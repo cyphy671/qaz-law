@@ -357,7 +357,6 @@ class MultiLangDocument(BaseModel):
         r, k = self.rus, self.kaz
         assert r.id == k.id, "act ID diverge"
         assert r.ngr == k.ngr, "NGR diverge"
-        assert r.actual_version == k.actual_version, "actual version diverge"
 
         # version date can diverge if this is actual versions of an act
         # assert r.version_date == k.version_date, "version date diverges"
@@ -365,6 +364,9 @@ class MultiLangDocument(BaseModel):
         # same for a cause code
         # if r.version.cause and k.version.cause:
         #     assert r.version.cause.code == k.version.cause.code, "cause code diverges"
+
+        # the actual version can diverge, if this is the same version of an act
+        # assert r.actual_version == k.actual_version, "actual version diverges"
 
         assert r.initial_publication_date == k.initial_publication_date, (
             "initial publication date diverge"

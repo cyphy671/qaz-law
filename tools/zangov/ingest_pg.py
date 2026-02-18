@@ -1,5 +1,5 @@
 import json
-from collections import defaultdict
+from datetime import date
 from time import sleep
 
 from httpx import HTTPStatusError
@@ -7,8 +7,8 @@ from sqlmodel import Session, select, SQLModel
 
 from .client import get_document_versions, get_document, iterate_documents
 from .enums import ActTypeEnum
-from .models import Act, engine, ActType, ActVersion, ActContent
-from .schemas import MultiLangDocument
+from .models import Act, engine, ActType, ActVersion
+from .schemas import MultiLangDocument, Document
 
 ACT_TYPES = {}
 
@@ -75,29 +75,25 @@ def get_latest_documents(doc_id: str):
     return ru, kz
 
 
-def construct_act_version(version_docs: MultiLangDocument):
+def construct_act_version(doc: Document):
+    # ensure actual_version is the same for all languages
+    #
+    # NOTE there are documents that have different actual versions by a language.
+    # example https://zan.gov.kz/client/#!/history/429/rus
+    # so actual_version should belong to the content, not version.
+    # the question is - is it a bug or
+    #
+    # assert len({doc.actual_version for doc in version_docs.docs}) == 1
+
     av = ActVersion(
-        date=version_docs.version_date, is_actual=version_docs.actual_version
+        date=doc.version_date,
+        language=doc.language,
+        is_actual=doc.actual_version,
+        version_id=doc.version.id,
+        content=json.dumps(doc.content, ensure_ascii=False),
     )
-
-    if version_docs.version.cause:
-        # ensure it to be equal among languages, if present in both
-        codes = {
-            doc.version.cause.code for doc in version_docs.docs if doc.version.cause
-        }
-        if len(codes) > 1:
-            raise ValueError(f"cause codes mismatch: {codes}")
-
-        av.cause_act_code = version_docs.version.cause.code
-
-    for doc in version_docs.docs:
-        ac = ActContent(
-            language=doc.language,
-            version_id=doc.version.id,
-            content=json.dumps(doc.content, ensure_ascii=False),
-        )
-        av.contents.append(ac)
-
+    if doc.version.cause and doc.version.cause.code:
+        av.cause_act_code = doc.version.cause.code
     return av
 
 
@@ -135,26 +131,23 @@ def construct_act(doc_id: str) -> Act | None:
         requisite=ml_act.metadata.requisites.rus,
     )
 
-    # collect act versions. Structure of ver_lang_doc:
-    # {
-    #    "2020-01-01": {
-    #        "rus": {...} | None,
-    #        "kaz": {...} | None
-    #    }
-    # }
-    ver_lang_doc = defaultdict(dict)
     for doc in ml_act.docs:
-        lang_versions = get_document_versions(doc.id, doc.language)[:-1]
-        lang_versions.append(doc)  # latest actual version
-        for v in lang_versions:
-            doc_version = get_document(doc.id, doc.language, v.version_date)
-            ver_lang_doc[v.version_date][v.language] = doc_version
+        versions = get_document_versions(doc.id, doc.language)
+
+        # should be unique by date and language
+        dedup_versions: dict[tuple[str, date], Document] = {}
+        for v in versions:
+            key = (v.language, v.version_date)
+            if key not in dedup_versions:
+                dedup_versions[key] = v
+
+        v_docs = []
+        for v in dedup_versions.values():
+            v_doc = get_document(doc.id, doc.language, v.version_date)
+            v_docs.append(v_doc)
             sleep(0.2)  # api precaution
 
-    for version_date, docs in ver_lang_doc.items():
-        ml_doc = MultiLangDocument(**docs)
-        act_version = construct_act_version(ml_doc)
-        act.versions.append(act_version)
+        act.versions.extend([construct_act_version(v_doc) for v_doc in v_docs])
 
     return act
 
@@ -162,18 +155,10 @@ def construct_act(doc_id: str) -> Act | None:
 def ingest_all(recreate: bool, start_page: int = 1):
     init_db(recreate=recreate)
 
-    follow_page = start_page
     with Session(engine) as session:
         for page, doc_meta in iterate_documents(
             start_page, per_page=20, act_types=ACT_TYPES_TO_INGEST
         ):
-            if page > follow_page:
-                # next page event
-                # commit flushed batch of `per_page` amount of acts
-                session.commit()
-                print("page", follow_page, "committed", flush=True)
-                follow_page = page
-
             if doc_meta.id in TROUBLED_CODES:
                 print(f"Skipping {doc_meta.id}")
                 continue
@@ -186,15 +171,12 @@ def ingest_all(recreate: bool, start_page: int = 1):
             print("page", page, "act", doc_meta.id, end="\r", flush=True)
             try:
                 act = construct_act(doc_meta.id)
+                if act:  # a constructed act
+                    session.add(act)
+                    session.commit()
+
             except Exception as e:
-                print(f"Failed to construct act {doc_meta.id}")
+                print(f"Failed to ingest act {doc_meta.id}")
                 raise
-
-            if act:  # a constructed act
-                session.add(act)
-                session.flush()
-
-        session.commit()
-        print("final page committed")
 
     return None

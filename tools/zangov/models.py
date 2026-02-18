@@ -80,6 +80,11 @@ class Act(SQLModel, table=True):
 
 class ActVersion(SQLModel, table=True):
     __tablename__ = "act_version"
+    __table_args__ = (
+        UniqueConstraint(
+            "act_id", "date", "language", name="uc_act_version_act_id_date_language"
+        ),
+    )
     id: int | None = Field(default=None, primary_key=True)
 
     act_id: int | None = Field(default=None, foreign_key="act.id")
@@ -95,47 +100,27 @@ class ActVersion(SQLModel, table=True):
         back_populates="issued_act_versions",
     )
 
-    is_actual: bool  # actual_version
-
+    # main discriminators for the content
     date: date
-    contents: list["ActContent"] = Relationship(back_populates="act_version")
-
-
-class ActContent(SQLModel, table=True):
-    __tablename__ = "act_content"
-    __table_args__ = (
-        UniqueConstraint("act_version_id", "language", name="act_content_unique_lang"),
-    )
-
-    id: int | None = Field(default=None, primary_key=True)
-    act_version_id: int | None = Field(default=None, foreign_key="act_version.id")
-    act_version: ActVersion = Relationship(back_populates="contents")
-
-    # main discriminator for the content
     language: Language = Field(
         sa_column=sa.Column(sa.Enum(Language, native_enum=False))
     )
 
+    is_actual: bool  # actual_version
     version_id: str  # can be different for the same version but different language
-    # markdown: str
     content: str = Field(sa_type=TEXT)
 
     @property
     def dump_path(self, ext="md"):
-        filename = f"{self.act_version.date.strftime('%Y%m%d')}-{self.act_version.act.code}-{self.language.value}.{ext}"
-        return (
-            Path("code")
-            / "type"
-            / self.act_version.act.types[0].code.name.lower()
-            / filename
-        )
+        filename = f"{self.date.strftime('%Y%m%d')}-{self.act.code}-{self.language.value}.{ext}"
+        return Path("code") / "type" / self.act.types[0].code.name.lower() / filename
 
     @property
-    def zangov_link(self):
-        url = f"https://zan.gov.kz/client/#!/doc/{self.act_version.act.code}/{self.language.value}"
-        if not self.act_version.is_actual:
+    def zan_gov_link(self):
+        url = f"https://zan.gov.kz/client/#!/doc/{self.act.code}/{self.language.value}"
+        if not self.is_actual:
             # append date to the link
-            url = url + "/" + self.act_version.date.strftime("%d.%m.%Y")
+            url = url + "/" + self.date.strftime("%d.%m.%Y")
         return url
 
 
