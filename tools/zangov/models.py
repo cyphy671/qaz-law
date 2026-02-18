@@ -1,7 +1,9 @@
 from datetime import date
+from pathlib import Path
 
-from sqlmodel import SQLModel, Field, create_engine, Relationship, UniqueConstraint, Column
+import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import TEXT
+from sqlmodel import SQLModel, Field, create_engine, Relationship, UniqueConstraint
 
 from .enums import Language, ActTypeEnum, ActStatus
 
@@ -9,13 +11,17 @@ from .enums import Language, ActTypeEnum, ActStatus
 class ActTypeLink(SQLModel, table=True):
     __tablename__ = "act_type_link"
     act_id: int | None = Field(default=None, foreign_key="act.id", primary_key=True)
-    type_id: int | None = Field(default=None, foreign_key="act_type.id", primary_key=True)
+    type_id: int | None = Field(
+        default=None, foreign_key="act_type.id", primary_key=True
+    )
 
 
 class ActType(SQLModel, table=True):
     __tablename__ = "act_type"
     id: int | None = Field(default=None, primary_key=True)
-    code: ActTypeEnum = Field(..., unique=True, description="Act type code")
+    code: ActTypeEnum = Field(
+        sa_column=sa.Column(sa.Enum(ActTypeEnum, native_enum=False), unique=True)
+    )
     acts: list["Act"] = Relationship(back_populates="types", link_model=ActTypeLink)
 
 
@@ -34,7 +40,9 @@ class Act(SQLModel, table=True):
     sa_doc_number_kz: str  # can be the same as code, but not everytime
 
     ngr: str
-    status: ActStatus
+    status: ActStatus = Field(
+        sa_column=sa.Column(sa.Enum(ActStatus, native_enum=False))
+    )
     # approval_place: str # '100051000000'
     # classified: str
     # developing_state_agency: str
@@ -60,8 +68,14 @@ class Act(SQLModel, table=True):
     # has_signature: bool
 
     types: list["ActType"] = Relationship(back_populates="acts", link_model=ActTypeLink)
-    versions: list["ActVersion"] = Relationship(back_populates="act", sa_relationship_kwargs={"foreign_keys": "ActVersion.act_id"})
-    issued_act_versions: list["ActVersion"] = Relationship(back_populates="cause_act", sa_relationship_kwargs={"foreign_keys": "ActVersion.cause_act_id"})
+    versions: list["ActVersion"] = Relationship(
+        back_populates="act",
+        sa_relationship_kwargs={"foreign_keys": "ActVersion.act_id"},
+    )
+    issued_act_versions: list["ActVersion"] = Relationship(
+        back_populates="cause_act",
+        sa_relationship_kwargs={"foreign_keys": "ActVersion.cause_act_id"},
+    )
 
 
 class ActVersion(SQLModel, table=True):
@@ -69,10 +83,17 @@ class ActVersion(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
 
     act_id: int | None = Field(default=None, foreign_key="act.id")
-    act: Act = Relationship(sa_relationship_kwargs={"foreign_keys": "ActVersion.act_id"}, back_populates="versions")
+    act: Act = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "ActVersion.act_id"},
+        back_populates="versions",
+    )
 
+    cause_act_code: str | None = Field(default=None)  # write cause act code here first
     cause_act_id: int | None = Field(default=None, foreign_key="act.id")
-    cause_act: Act | None = Relationship(sa_relationship_kwargs={"foreign_keys": "ActVersion.cause_act_id"}, back_populates="issued_act_versions")
+    cause_act: Act | None = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "ActVersion.cause_act_id"},
+        back_populates="issued_act_versions",
+    )
 
     is_actual: bool  # actual_version
 
@@ -82,16 +103,42 @@ class ActVersion(SQLModel, table=True):
 
 class ActContent(SQLModel, table=True):
     __tablename__ = "act_content"
-    __table_args__ = (UniqueConstraint("act_version_id", "language", name="act_content_unique_lang"),)
+    __table_args__ = (
+        UniqueConstraint("act_version_id", "language", name="act_content_unique_lang"),
+    )
 
     id: int | None = Field(default=None, primary_key=True)
     act_version_id: int | None = Field(default=None, foreign_key="act_version.id")
     act_version: ActVersion = Relationship(back_populates="contents")
-    language: Language  # main discriminator for the content
+
+    # main discriminator for the content
+    language: Language = Field(
+        sa_column=sa.Column(sa.Enum(Language, native_enum=False))
+    )
 
     version_id: str  # can be different for the same version but different language
     # markdown: str
     content: str = Field(sa_type=TEXT)
 
+    @property
+    def dump_path(self, ext="md"):
+        filename = f"{self.act_version.date.strftime('%Y%m%d')}-{self.act_version.act.code}-{self.language.value}.{ext}"
+        return (
+            Path("code")
+            / "type"
+            / self.act_version.act.types[0].code.name.lower()
+            / filename
+        )
 
-engine = create_engine('postgresql+psycopg://postgres:postgres@localhost:5436/postgres', echo=False)
+    @property
+    def zangov_link(self):
+        url = f"https://zan.gov.kz/client/#!/doc/{self.act_version.act.code}/{self.language.value}"
+        if not self.act_version.is_actual:
+            # append date to the link
+            url = url + "/" + self.act_version.date.strftime("%d.%m.%Y")
+        return url
+
+
+engine = create_engine(
+    "postgresql+psycopg://postgres:postgres@localhost:5436/postgres", echo=False
+)

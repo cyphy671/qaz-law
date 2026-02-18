@@ -1,6 +1,9 @@
 [project]
 name = "qaz-law"
 version = "0.1.0"
+authors = [
+    {email = "cyphy671@gmail.com"},
+]
 description = "An attempt to version control the Code of the Republic of Qazaqstan"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -14,4 +17,9 @@ dependencies = [
     "pydantic>=2.12.5",
     "sqlmodel>=0.0.33",
     "tzdata>=2025.3",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.1",
 ]

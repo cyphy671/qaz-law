@@ -3,14 +3,16 @@
 import logging
 import time
 from datetime import date
+from pathlib import Path
 from time import sleep
-from typing import Literal, Iterable
+from typing import Iterable, Literal
 
 import httpx
 from httpx_retries import RetryTransport
 
 from .enums import BASE_URL, DEFAULT_HEADERS, ActTypeEnum
-from .schemas import Document, VersionInfo, SearchPage, SearchActMetadata
+from .md import document_to_md
+from .schemas import Document, SearchActMetadata, SearchPage, VersionInfo
 
 logger = logging.getLogger(__name__)
 
@@ -22,15 +24,15 @@ httpx_client = httpx.Client(
     timeout=30,
 )
 
-def list_documents(page: int = 1, act_types: list[ActTypeEnum] = None) -> SearchPage:
+
+def list_documents(
+    page: int = 1, per_page: int = 20, act_types: list[ActTypeEnum] | None = None
+) -> SearchPage:
     url = f"/documents/search"
     json_payload = {
         "page": page,
-        "limit": 20,
-        "sortBy": {
-            "desc": False,
-            "field": "stateAgencyApprovalDate"
-        },
+        "limit": per_page,
+        "sortBy": {"desc": False, "field": "stateAgencyApprovalDate"},
     }
     if act_types:
         json_payload["actTypes"] = [v.value for v in act_types]
@@ -40,19 +42,25 @@ def list_documents(page: int = 1, act_types: list[ActTypeEnum] = None) -> Search
     return SearchPage.model_validate(response.json(), extra="forbid")
 
 
-def iterate_documents(start_page: int = 1, **kwargs) -> Iterable[SearchActMetadata]:
+def iterate_documents(
+    start_page: int = 1, **kwargs
+) -> Iterable[tuple[int, SearchActMetadata]]:
     page = end_page = start_page
     while page <= end_page:
         search_page = list_documents(page, **kwargs)
         end_page = search_page.page_count  # update end page
-        print(f"page {page} of {end_page}")
         for doc in search_page.documents:
-            yield doc
+            yield page, doc
         sleep(0.5)
         page += 1
 
 
-def get_document(document_id: str, language: Literal["rus", "kaz"] | str, version: date = None, html: bool = False) -> Document:
+def get_document(
+    document_id: str,
+    language: Literal["rus", "kaz"] | str,
+    version: date | None = None,
+    html: bool = False,
+) -> Document:
     """Get a document by ID and language."""
     url = f"/documents/{document_id}/{language}"
     if version:
@@ -73,4 +81,23 @@ def get_document_versions(document_id: str, language: str):
     url = f"/documents/{document_id}/{language}/versions"
     response = httpx_client.get(url)
     response.raise_for_status()
-    return [VersionInfo.model_validate(item, extra="forbid") for item in response.json()]
+    return [
+        VersionInfo.model_validate(item, extra="forbid") for item in response.json()
+    ]
+
+
+def dump(d: Document) -> Path:
+    if isinstance(d.content, str):
+        ext = "html"
+    else:
+        ext = "md"
+
+    filename = f"{d.version_date.strftime('%Y%m%d')}-{d.id}-{d.language}.{ext}"
+
+    path = Path("code") / filename
+    with open(path, "w", encoding="utf-8") as f:
+        if isinstance(d.content, str):
+            f.write(d.content)
+        else:
+            f.write(document_to_md(d))
+    return path

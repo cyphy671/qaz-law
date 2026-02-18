@@ -5,6 +5,7 @@ from enum import Enum
 
 class Language(str, Enum):
     """Supported language codes for document retrieval."""
+
     RUS = "rus"
     KAZ = "kaz"
 
@@ -49,6 +50,7 @@ class ContentType(str, Enum):
 
 class ActTypeEnum(str, Enum):
     """Types of acts found in documents."""
+
     DOP = "ДОП"
     ZAK = "ЗАК"
     IZM = "ИЗМ"
@@ -96,6 +98,12 @@ class ActTypeEnum(str, Enum):
     KONTS = "КОНЦ"
     USL = "УСЛ"
     KRIT = "КРИТ"
+    STRA = "СТРА"
+    KONT = "КОНТ"
+    SUPR = "СУПР"
+    OPOL = "ОПОЛ"
+    POPR = "ПОПР"
+    ZAYAV = "ЗАЯВ"
 
 
 class ActStatus(str, Enum):
@@ -105,6 +113,7 @@ class ActStatus(str, Enum):
     TEMPORARY_REVOKED = "temporaryRevoked"
     UPD = "upd"
     BAK = "bak"
+    VEXP = "vexp"
 
 
 # Default values
