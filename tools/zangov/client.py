@@ -49,6 +49,7 @@ def iterate_documents(
     while page <= end_page:
         search_page = list_documents(page, **kwargs)
         end_page = search_page.page_count  # update end page
+        print("page", page, "of", end_page)
         for doc in search_page.documents:
             yield page, doc
         sleep(0.5)

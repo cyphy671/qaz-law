@@ -97,7 +97,7 @@ def construct_act_version(doc: Document):
     return av
 
 
-def construct_act(doc_id: str) -> Act | None:
+def construct_act(doc_id: str, s: Session) -> Act | None:
     """
     Construct a single act, together with its versions and language contents.
 
@@ -130,6 +130,8 @@ def construct_act(doc_id: str) -> Act | None:
         title=ml_act.metadata.title.rus,
         requisite=ml_act.metadata.requisites.rus,
     )
+    s.add(act)
+    s.flush()
 
     for doc in ml_act.docs:
         versions = get_document_versions(doc.id, doc.language)
@@ -147,7 +149,9 @@ def construct_act(doc_id: str) -> Act | None:
             v_docs.append(v_doc)
             sleep(0.2)  # api precaution
 
-        act.versions.extend([construct_act_version(v_doc) for v_doc in v_docs])
+        for v_doc in v_docs:
+            act.versions.append(construct_act_version(v_doc))
+            s.flush()  # make flush for every version to avoid sending a huge data packet on commit
 
     return act
 
@@ -170,13 +174,12 @@ def ingest_all(recreate: bool, start_page: int = 1):
 
             print("page", page, "act", doc_meta.id, end="\r", flush=True)
             try:
-                act = construct_act(doc_meta.id)
-                if act:  # a constructed act
-                    session.add(act)
+                act = construct_act(doc_meta.id, session)
+                if act:  # a constructed and flushed act
                     session.commit()
 
             except Exception as e:
-                print(f"Failed to ingest act {doc_meta.id}")
-                raise
+                print(f"Failed to ingest act {doc_meta.id}: {e}")
+                return doc_meta
 
     return None
