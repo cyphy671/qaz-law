@@ -245,6 +245,8 @@ def ingest_all(recreate: bool, start_page: int = 1, max_workers: int = 2):
         except KeyboardInterrupt:
             print("\nCtrl+C received. Stopping submission...")
             interrupted = True
+        except Exception as e:
+            print("Error running ingestion loop:", e)
 
         if futures:
             print("Waiting for running tasks to finish...")
