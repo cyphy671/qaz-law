@@ -1,15 +1,22 @@
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from datetime import date
 
 from httpx import HTTPStatusError
 from sqlmodel import Session, select, SQLModel
 
-from .client import get_document_versions, get_document, iterate_documents
+from .client import (
+    get_document_versions,
+    get_document,
+    iterate_documents,
+)
 from .enums import ActTypeEnum
 from .models import Act, engine, ActType, ActVersion
-from .schemas import MultiLangDocument, Document
+from .schemas import MultiLangDocument, Document, SearchActMetadata
 
-ACT_TYPES = {}
+_thread_cache = threading.local()
+
 
 TROUBLED_CODES = [
     "2574",  # ru/kz разные документы
@@ -32,13 +39,21 @@ ACT_TYPES_TO_INGEST = [
 ]
 
 
+def get_act_types(session) -> dict[str, ActType]:
+    if not hasattr(_thread_cache, "act_types"):
+        _thread_cache.act_types = {
+            at.code: at for at in session.exec(select(ActType)).all()
+        }
+    return _thread_cache.act_types
+
+
 def init_db(recreate=False):
     if recreate:
         SQLModel.metadata.drop_all(engine)
 
     SQLModel.metadata.create_all(engine, checkfirst=True)
 
-    # create act types if not created yet, and cache them all
+    # create act types if not created yet
     with Session(engine) as session:
         for at_enum in ActTypeEnum:
             at = session.exec(
@@ -47,9 +62,7 @@ def init_db(recreate=False):
             if not at:
                 at = ActType(code=at_enum.value)
                 session.add(at)
-                session.commit()
-                session.refresh(at)
-            ACT_TYPES[at.code] = at
+        session.commit()
 
 
 def get_latest_documents(doc_id: str):
@@ -125,7 +138,7 @@ def construct_act(doc_id: str, s: Session) -> Act | None:
         ju_approval_date=ml_act.metadata.judiciary_approval_date,
         action_date=ml_act.metadata.action_date,
         effective_date=ml_act.metadata.effective_date,
-        types=[ACT_TYPES[_type] for _type in ml_act.metadata.act_types],
+        types=[get_act_types(s)[_type] for _type in ml_act.metadata.act_types],
         title=ml_act.metadata.title.rus,
         requisite=ml_act.metadata.requisites.rus,
     )
@@ -154,30 +167,89 @@ def construct_act(doc_id: str, s: Session) -> Act | None:
     return act
 
 
-def ingest_all(recreate: bool, start_page: int = 1):
-    init_db(recreate=recreate)
+def process_doc(page: int, doc_meta: SearchActMetadata):
+    if doc_meta.id in TROUBLED_CODES:
+        print(f"Skipping {doc_meta.id}")
+        return
 
     with Session(engine) as session:
-        for page, doc_meta in iterate_documents(
-            start_page, per_page=20, act_types=ACT_TYPES_TO_INGEST
-        ):
-            if doc_meta.id in TROUBLED_CODES:
-                print(f"Skipping {doc_meta.id}")
-                continue
+        act = session.exec(select(Act).where(Act.code == doc_meta.id)).first()
+        if act:
+            print(doc_meta.id, "already ingested")
+            return
 
-            act = session.exec(select(Act).where(Act.code == doc_meta.id)).first()
-            if act:
-                print(doc_meta.id, "already ingested")
-                continue
+        act = construct_act(doc_meta.id, session)
+        if act:  # a constructed and flushed act
+            session.commit()
+            print(
+                threading.current_thread().name,
+                "page",
+                page,
+                "act",
+                doc_meta.id,
+                "ingested",
+            )
 
-            print("page", page, "act", doc_meta.id, end="\r", flush=True)
+
+def ingest_all(recreate: bool, start_page: int = 1, max_workers: int = 2):
+    init_db(recreate=recreate)
+    docs_iterable = iterate_documents(
+        start_page, per_page=20, act_types=ACT_TYPES_TO_INGEST
+    )
+
+    futures = set()
+    stop_consuming = False
+    interrupted = False
+
+    with ThreadPoolExecutor(
+        max_workers=max_workers, thread_name_prefix="thread"
+    ) as executor:
+
+        def submit_next():
             try:
-                act = construct_act(doc_meta.id, session)
-                if act:  # a constructed and flushed act
-                    session.commit()
+                page, doc_meta = next(docs_iterable)
+            except StopIteration:
+                print("No more documents to ingest")
+                return None
+            return executor.submit(process_doc, page, doc_meta)
 
-            except Exception as e:
-                print(f"Failed to ingest act {doc_meta.id}: {e}")
-                return doc_meta
+        try:
+            # Prime pool
+            for _ in range(max_workers):
+                fut = submit_next()
+                if fut is None:
+                    break
+                futures.add(fut)
 
-    return None
+            # Rolling saturation
+            while futures:
+                done, futures = wait(futures, return_when=FIRST_COMPLETED)
+
+                for future in done:
+                    try:
+                        future.result()  # surface worker errors
+                    except Exception as e:
+                        print(f"Worker failed: {e}")
+                        stop_consuming = True
+
+                    # Only refill if no failure occurred
+                    if not stop_consuming:
+                        next_future = submit_next()
+                        if next_future:
+                            futures.add(next_future)
+
+                # If failure happened, stop refilling entirely
+                if stop_consuming:
+                    break
+
+        except KeyboardInterrupt:
+            print("\nCtrl+C received. Stopping submission...")
+            interrupted = True
+
+        if futures:
+            print("Waiting for running tasks to finish...")
+            wait(futures)
+
+        print("All running tasks are finished")
+        if interrupted:
+            print("Exited due to user interrupt")

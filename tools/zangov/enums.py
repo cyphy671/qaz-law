@@ -105,6 +105,7 @@ class ActTypeEnum(str, Enum):
     POPR = "ПОПР"
     ZAYAV = "ЗАЯВ"
     HART = "ХАРТ"
+    SNIP = "СНИП"
 
 
 class ActStatus(str, Enum):

@@ -4,7 +4,6 @@ import logging
 import time
 from datetime import date
 from pathlib import Path
-from time import sleep
 from typing import Iterable, Literal
 
 import httpx
@@ -52,7 +51,6 @@ def iterate_documents(
         print("page", page, "of", end_page)
         for doc in search_page.documents:
             yield page, doc
-        sleep(0.5)
         page += 1
 
 

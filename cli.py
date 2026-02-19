@@ -11,9 +11,10 @@ console = Console()
 def ingest(
     recreate: bool = typer.Option(False, "--recreate", "-r"),
     start_page: int = typer.Option(1, "--start-page", "-s"),
+    workers: int = typer.Option(2, "--workers", "-w"),
 ):
     console.print("[bold green]Starting ingest...[/bold green]")
-    ingest_all(recreate=recreate, start_page=start_page)
+    ingest_all(recreate=recreate, start_page=start_page, max_workers=workers)
     console.print("[bold green]Data ingest completed successfully.[/bold green]")
 
 

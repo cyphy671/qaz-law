@@ -388,7 +388,7 @@ class MultiLangDocument(BaseModel):
             # "developing_state_agency",
             # "judicial_authority",
             # "legal_validity",
-            "registry_number",
+            # "registry_number",  # differ sometimes, and we don't store it
             "judiciary_doc_number",
             # "state_agency_approval_date", # they can diverge, ignore and take a rus version
             # "judiciary_approval_date", # they can diverge, ignore and take a rus version
