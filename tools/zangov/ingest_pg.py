@@ -1,6 +1,5 @@
 import json
 from datetime import date
-from time import sleep
 
 from httpx import HTTPStatusError
 from sqlmodel import Session, select, SQLModel
@@ -147,7 +146,6 @@ def construct_act(doc_id: str, s: Session) -> Act | None:
         for v in dedup_versions.values():
             v_doc = get_document(doc.id, doc.language, v.version_date)
             v_docs.append(v_doc)
-            sleep(0.2)  # api precaution
 
         for v_doc in v_docs:
             act.versions.append(construct_act_version(v_doc))

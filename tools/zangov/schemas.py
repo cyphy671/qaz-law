@@ -372,7 +372,7 @@ class MultiLangDocument(BaseModel):
             "initial publication date diverge"
         )
 
-        if r.metadata.act_types != k.metadata.act_types:
+        if set(r.metadata.act_types) != set(k.metadata.act_types):
             # combine act types from both documents
             print(f"act types diverge: {r.metadata.act_types} / {k.metadata.act_types}")
             all_types = sorted(set(r.metadata.act_types + k.metadata.act_types))
