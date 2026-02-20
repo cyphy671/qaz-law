@@ -109,6 +109,7 @@ class ActVersion(SQLModel, table=True):
     is_actual: bool  # actual_version
     version_id: str  # can be different for the same version but different language
     content: str = Field(sa_type=TEXT)
+    pages_count: int  # pages are combined inside content, but we can differentiate them by DOC element
 
     @property
     def dump_path(self, ext="md"):

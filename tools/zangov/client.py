@@ -4,23 +4,46 @@ import logging
 import time
 from datetime import date
 from pathlib import Path
+from time import sleep
 from typing import Iterable, Literal
 
 import httpx
+from fake_useragent import UserAgent
 from httpx_retries import RetryTransport
 
-from .enums import BASE_URL, DEFAULT_HEADERS, ActTypeEnum
+from .enums import ActTypeEnum
 from .md import document_to_md
 from .schemas import Document, SearchActMetadata, SearchPage, VersionInfo
 
 logger = logging.getLogger(__name__)
 
 
+# Default values
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_RETRY_DELAY = 1.0
+
+# Base URL
+BASE_URL = "https://zan.gov.kz/api"
+
+# HTTP Headers
+ua = UserAgent()
+DEFAULT_HEADERS = {
+    "Accept": "*/*",
+    "X-Requested-With": "XMLHttpRequest",
+    "Referer": "https://zan.gov.kz/client/",
+    "User-Agent": ua.random,
+    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+}
+
+
 httpx_client = httpx.Client(
     base_url=BASE_URL,
     headers=DEFAULT_HEADERS.copy(),
     transport=RetryTransport(transport=httpx.HTTPTransport(verify=False)),
-    timeout=30,
+    timeout=60,  # huge docs take a long time to download
 )
 
 
@@ -52,6 +75,7 @@ def iterate_documents(
         for doc in search_page.documents:
             yield page, doc
         page += 1
+        sleep(0.1)
 
 
 def get_document(
@@ -59,6 +83,7 @@ def get_document(
     language: Literal["rus", "kaz"] | str,
     version: date | None = None,
     html: bool = False,
+    page: int = 1,
 ) -> Document:
     """Get a document by ID and language."""
     url = f"/documents/{document_id}/{language}"
@@ -67,7 +92,7 @@ def get_document(
 
     params = {
         "withHtml": "true" if html else "false",
-        "page": 1,
+        "page": page,
         "r": int(time.time() * 1000),
     }
 

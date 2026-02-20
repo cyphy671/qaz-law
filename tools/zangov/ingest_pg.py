@@ -104,6 +104,7 @@ def construct_act_version(doc: Document):
         is_actual=doc.actual_version,
         version_id=doc.version.id,
         content=json.dumps(doc.content, ensure_ascii=False),
+        pages_count=doc.pages_count,
     )
     if doc.version.cause and doc.version.cause.code:
         av.cause_act_code = doc.version.cause.code
@@ -159,6 +160,13 @@ def construct_act(doc_id: str, s: Session) -> Act | None:
         v_docs = []
         for v in dedup_versions.values():
             v_doc = get_document(doc.id, doc.language, v.version_date)
+            for additional_page in range(2, v_doc.pages_count + 1):
+                # the document can have multiple pages, we will extend the content with them
+                page_doc = get_document(
+                    doc.id, doc.language, v.version_date, page=additional_page
+                )
+                v_doc.content.extend(page_doc.content)
+
             v_docs.append(v_doc)
 
         for v_doc in v_docs:
