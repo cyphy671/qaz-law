@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from datetime import date
 
@@ -23,20 +24,20 @@ TROUBLED_CODES = [
 ]
 
 
-ACT_TYPES_TO_INGEST = [
-    ActTypeEnum.KONS,
-    ActTypeEnum.KZAK,
-    ActTypeEnum.KOD,
-    ActTypeEnum.ZAK,
-    ActTypeEnum.UZAK,
-    ActTypeEnum.UKAZ,
-    ActTypeEnum.UKON,
-    ActTypeEnum.NPOS,
-    ActTypeEnum.POST,
-    ActTypeEnum.PRIK,
-    ActTypeEnum.RASP,
-    ActTypeEnum.RESH,
-]
+# ACT_TYPES_TO_INGEST = [
+#     ActTypeEnum.KONS,
+#     ActTypeEnum.KZAK,
+#     ActTypeEnum.KOD,
+#     ActTypeEnum.ZAK,
+#     ActTypeEnum.UZAK,
+#     ActTypeEnum.UKAZ,
+#     ActTypeEnum.UKON,
+#     ActTypeEnum.NPOS,
+#     ActTypeEnum.POST,
+#     ActTypeEnum.PRIK,
+#     ActTypeEnum.RASP,
+#     ActTypeEnum.RESH,
+# ]
 
 
 def get_act_types(session) -> dict[str, ActType]:
@@ -175,27 +176,34 @@ def process_doc(page: int, doc_meta: SearchActMetadata):
     with Session(engine) as session:
         act = session.exec(select(Act).where(Act.code == doc_meta.id)).first()
         if act:
-            print(doc_meta.id, "already ingested")
+            # print(
+            #     "page",
+            #     page,
+            #     "act",
+            #     doc_meta.id,
+            #     "already ingested",
+            # )
             return
 
+        t1 = time.time()
         act = construct_act(doc_meta.id, session)
         if act:  # a constructed and flushed act
             session.commit()
+            vc = len(act.versions)
             print(
                 threading.current_thread().name,
                 "page",
                 page,
                 "act",
                 doc_meta.id,
-                "ingested",
+                f"({vc} ver)",
+                f"[{time.time() - t1:.02f}s]",
             )
 
 
 def ingest_all(recreate: bool, start_page: int = 1, max_workers: int = 2):
     init_db(recreate=recreate)
-    docs_iterable = iterate_documents(
-        start_page, per_page=20, act_types=ACT_TYPES_TO_INGEST
-    )
+    docs_iterable = iterate_documents(start_page, per_page=100)
 
     futures = set()
     stop_consuming = False
@@ -206,20 +214,13 @@ def ingest_all(recreate: bool, start_page: int = 1, max_workers: int = 2):
     ) as executor:
 
         def submit_next():
-            try:
-                page, doc_meta = next(docs_iterable)
-            except StopIteration:
-                print("No more documents to ingest")
-                return None
+            page, doc_meta = next(docs_iterable)
             return executor.submit(process_doc, page, doc_meta)
 
         try:
             # Prime pool
             for _ in range(max_workers):
-                fut = submit_next()
-                if fut is None:
-                    break
-                futures.add(fut)
+                futures.add(submit_next())
 
             # Rolling saturation
             while futures:
@@ -234,9 +235,7 @@ def ingest_all(recreate: bool, start_page: int = 1, max_workers: int = 2):
 
                     # Only refill if no failure occurred
                     if not stop_consuming:
-                        next_future = submit_next()
-                        if next_future:
-                            futures.add(next_future)
+                        futures.add(submit_next())
 
                 # If failure happened, stop refilling entirely
                 if stop_consuming:
@@ -245,6 +244,8 @@ def ingest_all(recreate: bool, start_page: int = 1, max_workers: int = 2):
         except KeyboardInterrupt:
             print("\nCtrl+C received. Stopping submission...")
             interrupted = True
+        except StopIteration:
+            print("No more documents to ingest")
         except Exception as e:
             print("Error running ingestion loop:", e)
 

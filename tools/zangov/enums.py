@@ -107,6 +107,12 @@ class ActTypeEnum(str, Enum):
     HART = "ХАРТ"
     SNIP = "СНИП"
     PACT = "ПАКТ"
+    KONK = "КОНК"
+    SPRA = "СПРА"
+    METU = "МЕТУ"
+    METR = "МЕТР"
+    OPRD = "ОПРД"
+    TECHN = "ТЕХН"
 
 
 class ActStatus(str, Enum):
